@@ -27,7 +27,15 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import org.junit.Test;
+import static org.junit.Assert.*;
 
+import org.json.XML;
+import org.json.JSONObject;
+import org.json.JSONPointer;
+import org.json.JSONException;
+
+import java.io.StringReader;
 /**
  * Tests for JSON-Java XML.java
  * Note: noSpace() will be tested by JSONMLTest
@@ -1424,6 +1432,49 @@ public class XMLTest {
         // Workaround for now is to use keepStrings
         JSONObject jsonObject3 = XML.toJSONObject(str2, new XMLParserConfiguration().withKeepStrings(true));
         assertEquals(jsonObject3.getJSONObject("color").getString("value"), "008E97");
+    }
+
+    @Test
+    public void toJSONObject_extractsSubObject() {
+        String xml = "<library><book><title>Clean Code</title><author>Robert Martin</author></book></library>";
+        JSONPointer path = new JSONPointer("/library/book");
+        JSONObject actual = XML.toJSONObject(new StringReader(xml), path);
+
+        JSONObject expected = new JSONObject()
+                .put("book", new JSONObject()
+                        .put("title", "Clean Code")
+                        .put("author", "Robert Martin"));
+
+        assertEquals(expected.toString(), actual.toString());
+    }
+
+    @Test(expected = JSONException.class)
+    public void toJSONObject_pathNotFound_throws() {
+        String xml = "<library><book><title>Clean Code</title></book></library>";
+        JSONPointer badPath = new JSONPointer("/library/magazine");
+        XML.toJSONObject(new StringReader(xml), badPath);
+    }
+
+    @Test
+    public void toJSONObject_replacesSubObject() {
+        String xml = "<library><book><title>Clean Code</title></book></library>";
+        JSONPointer path = new JSONPointer("/library/book/title");
+        JSONObject replacement = new JSONObject().put("title", "Refactoring");
+
+        JSONObject result = XML.toJSONObject(new StringReader(xml), path, replacement);
+
+        // Check the replacement
+        String newTitle = result.query("/library/book/title/title").toString();
+        assertEquals("Refactoring", newTitle);
+    }
+
+    @Test(expected = JSONException.class)
+    public void toJSONObject_replace_badPath_throws() {
+        String xml = "<library><book><title>Clean Code</title></book></library>";
+        JSONPointer badPath = new JSONPointer("/library/book/author");
+        JSONObject replacement = new JSONObject().put("author", "Someone Else");
+
+        XML.toJSONObject(new StringReader(xml), badPath, replacement);
     }
 
 }
