@@ -660,6 +660,133 @@ public class XML {
         return toJSONObject(reader, XMLParserConfiguration.ORIGINAL);
     }
 
+    // Requireement 1
+    public static JSONObject toJSONObject(Reader reader, JSONPointer path) throws JSONException {
+        XMLTokener tokener = new XMLTokener(reader, XMLParserConfiguration.ORIGINAL);
+        JSONObject result = new JSONObject();
+        List<String> pathTokens = getPathTokens(path);
+    
+        while (tokener.more()) {
+            tokener.skipPast("<");
+            if (!tokener.more()) break;
+    
+            JSONObject context = new JSONObject();
+            List<String> currentPath = new ArrayList<>();
+            boolean found = parseWithPointer(tokener, context, null, XMLParserConfiguration.ORIGINAL, 0, currentPath, pathTokens);
+            if (found) {
+                return context;
+            }
+        }
+    
+        throw new JSONException("JSONPointer path not found in XML.");
+    }
+
+    private static boolean parseWithPointer(XMLTokener x, JSONObject context, String name, XMLParserConfiguration config,
+                                        int currentNestingDepth, List<String> currentPath, List<String> targetPath) {
+    Object token = x.nextToken();
+
+    if (token == XML.SLASH) {
+        x.nextToken(); // skip end tag
+        x.nextToken(); // skip >
+        if (!currentPath.isEmpty()) currentPath.remove(currentPath.size() - 1); // pop
+        return false;
+    }
+
+    if (!(token instanceof String)) return false;
+    String tagName = (String) token;
+    JSONObject jsonObject = new JSONObject();
+    currentPath.add(tagName); // push
+
+    while (true) {
+        token = x.nextToken();
+        if (token == XML.GT) break; // end tag opening
+    }
+
+    // Checks if the current position is equal to the target JSONPointer
+    if (currentPath.equals(targetPath)) {
+        while (x.more()) {
+            Object content = x.nextContent();
+            if (content instanceof String) {
+                jsonObject.put("content", content);
+                context.put(tagName, jsonObject);
+                return true;
+            } else if (content == XML.LT) {
+                Object next = x.nextToken();
+                if (next == XML.SLASH) {
+                    x.nextToken(); // skip tagName
+                    x.nextToken(); // skip >
+                    context.put(tagName, jsonObject);
+                    return true;
+                }
+            }
+        }
+    } else {
+        // Parsing child nodes
+        while (x.more()) {
+            Object content = x.nextContent();
+            if (content == XML.LT) {
+                Object next = x.nextToken();
+                if (next == XML.SLASH) {
+                    x.nextToken(); // skip tagName
+                    x.nextToken(); // skip >
+                    break;
+                } else {
+                    x.back();
+                    parseWithPointer(x, jsonObject, tagName, config, currentNestingDepth + 1, currentPath, targetPath);
+                }
+            }
+        }
+        context.put(tagName, jsonObject);
+    }
+
+    if (!currentPath.isEmpty()) currentPath.remove(currentPath.size() - 1); // pop
+    return false;
+    }
+
+    private static List<String> getPathTokens(JSONPointer path) {
+        try {
+            java.lang.reflect.Field field = JSONPointer.class.getDeclaredField("refTokens");
+            field.setAccessible(true);
+            return (List<String>) field.get(path);
+        } catch (Exception e) {
+            throw new JSONException("Unable to extract JSONPointer path", e);
+        }
+    }
+    
+    // Requirement 2
+    public static JSONObject toJSONObject(Reader reader, JSONPointer path, JSONObject replacement) throws JSONException {
+        // Convert the entire XML to JSONObject
+        JSONObject fullJson = toJSONObject(reader, XMLParserConfiguration.ORIGINAL);
+    
+        // Find the parent of JSONPointer and replace the child node
+        List<String> tokens = getPathTokens(path);
+        if (tokens.isEmpty()) {
+            // If path is empty, replace the entire path
+            return replacement;
+        }
+    
+        JSONObject parent = fullJson;
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            String token = tokens.get(i);
+            Object next = parent.opt(token);
+    
+            if (next instanceof JSONObject) {
+                parent = (JSONObject) next;
+            } else {
+                throw new JSONException("Path not found: " + path.toString());
+            }
+        }
+    
+        // Replace the last layer
+        String lastKey = tokens.get(tokens.size() - 1);
+        parent.put(lastKey, replacement);
+    
+        // Return the entire JSON
+        return fullJson;
+    }
+    
+    
+
     /**
      * Convert a well-formed (but not necessarily valid) XML into a
      * JSONObject. Some information may be lost in this transformation because
